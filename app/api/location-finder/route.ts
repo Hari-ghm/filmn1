@@ -78,7 +78,7 @@ export async function POST(req: Request) {
     const fallback = fallbackLocations({ vibe });
 
     const systemPrompt =
-      "You suggest real-world film shooting locations. Return ONLY valid JSON. Use gmapQuery strings suitable for Google Maps search URLs. Keep output practical for a short film.";
+      "You are a master location scout proposing EXACT, REAL WORLD, hyper-specific film shooting locations. Unless the user specifies a particular city or country in their description, default to locations STRICTLY within Tamil Nadu, India (e.g. 'Napier Bridge in Chennai', 'Thirumalai Nayakkar Mahal in Madurai'). Return ONLY valid JSON. Use highly precise gmapQuery strings suitable for Google Maps search URLs to pinpoint the exact address. Do NOT return generalized areas.";
 
     const userPrompt = JSON.stringify(
       {
@@ -86,9 +86,11 @@ export async function POST(req: Request) {
         surrounding,
         vibe,
         tasks: [
-          "Suggest 5-7 specific location ideas that match the scene visuals and mood.",
-          "Each location must include: name, addressOrArea (short), whyMatches (short), gmapQuery (short), timeOfDay (short).",
-          "Also provide 3 extra map search ideas as mapSuggestions.",
+          "Suggest 5-7 hyper-specific, exact target spot locations that perfectly match the scene visuals and mood.",
+          "IMPORTANT: If the user mentions a specific place, use that. Otherwise, ALWAYS suggest exact locations in Tamil Nadu, India.",
+          "NO generalized concepts. You must name an EXACT real-world spot, street corner, cafe, public building, or geographic landmark.",
+          "Each location must include: name (Exact real-world name), addressOrArea (Exact City/District, Tamil Nadu, or User's requested region), whyMatches (Why this highly specific spot works creatively), gmapQuery (Detailed query to pinpoint the exact location on Google Maps), timeOfDay (Ideal lighting/time).",
+          "Also provide 3 extra highly precise map search ideas as mapSuggestions.",
         ],
         requiredJsonKeys: ["locations", "mapSuggestions"],
       },

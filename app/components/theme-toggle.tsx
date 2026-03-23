@@ -29,12 +29,12 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label={label}
-      className="group inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-foreground backdrop-blur transition hover:bg-white/10"
+      className="group inline-flex items-center gap-3 rounded-full border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 px-4 py-2 text-xs uppercase tracking-widest text-foreground backdrop-blur transition hover:border-primary/50"
     >
-      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10">
+      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/5 dark:bg-white/5 ring-1 ring-black/10 dark:ring-white/10 group-hover:text-primary transition-colors">
         {isDark ? <MoonIcon /> : <SunIcon />}
       </span>
-      <span className="hidden sm:inline">{isDark ? "Dark" : "Light"}</span>
+      <span className="hidden sm:inline opacity-80 group-hover:opacity-100 transition-opacity">{isDark ? "Dark" : "Light"}</span>
     </button>
   );
 }

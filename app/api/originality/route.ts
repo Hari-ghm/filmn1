@@ -73,7 +73,7 @@ export async function POST(req: Request) {
         .lean();
     }
 
-    const matches = computeSimilarityMatches({
+    const matches = await computeSimilarityMatches({
       inputStory: story,
       existingStories,
       topK: 3,

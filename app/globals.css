@@ -1,58 +1,59 @@
 @import "tailwindcss";
 
 :root {
-  /* Default to dark theme (override with html:not(.dark) below). */
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #fafafa;
+  --foreground: #050505;
+  --primary: #b08945;
 }
 
-.light {
-  --background: #ffffff;
-  --foreground: #171717;
+.dark {
+  --background: #020202;
+  --foreground: #fafafa;
+  --primary: #d4b572;
 }
 
 html:not(.dark) {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafafa;
+  --foreground: #050505;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-playfair);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, Segoe UI,
-    Roboto, Helvetica, Arial, sans-serif;
+  transition: background-color 0.4s ease, color 0.4s ease;
 }
 
-.filmn1-noise {
+.film-grain {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 0;
-  opacity: 0.07;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
+  z-index: 40;
+  opacity: 0.6;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.25'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
 }
 
-.filmn1-bg {
-  position: relative;
-  z-index: 1;
-  background:
-    radial-gradient(1000px 480px at 20% 5%, rgba(125, 211, 252, 0.12), transparent 55%),
-    radial-gradient(850px 420px at 85% 18%, rgba(167, 139, 250, 0.12), transparent 50%),
-    radial-gradient(900px 520px at 30% 95%, rgba(34, 197, 94, 0.08), transparent 55%),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 35%);
+.dark .film-grain {
+  opacity: 0.4;
+  mix-blend-mode: color-dodge;
 }
 
-.filmn1-grid {
-  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 1), rgba(0, 0, 0, 0) 75%);
+.cinematic-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: inset 0 0 150px rgba(0,0,0,0.1);
+}
+
+.dark .cinematic-vignette {
+  box-shadow: inset 0 0 250px rgba(0,0,0,0.95);
 }
