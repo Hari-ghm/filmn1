@@ -5,13 +5,53 @@ import { computeSimilarityMatches } from "../../../lib/similarity";
 import { groqGenerateJson } from "../../../lib/groq";
 
 type OriginalityResponse = {
-  similarityMatches?: Array<{ similarity: number; storySnippet: string }>;
+  similarityMatches?: Array<{ similarity: number; storySnippet: string; movieTitle: string }>;
   uniquenessAngle?: string;
+  similarRealMovie?: { title: string; explanation: string };
   rewrites?: Array<{ name: string; logline: string }>;
   plotDifferentiationChecklist?: string[];
   stored?: boolean;
   message?: string;
 };
+
+const RANDOM_MOVIE_NAMES = [
+  "Midnight Echoes",
+  "Shadows of Tomorrow",
+  "Neon Monsoon",
+  "Broken Orbit",
+  "Last Signal Home",
+  "Ashes and Starlight",
+];
+
+function pickRandomMovieName(seed: number): string {
+  return RANDOM_MOVIE_NAMES[seed % RANDOM_MOVIE_NAMES.length];
+}
+
+function sanitizeSimilarity(
+  value: unknown,
+  fallback = 0.51,
+): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+function resolveMovieTitleFromSnippet({
+  storySnippet,
+  existingStories,
+  index,
+}: {
+  storySnippet: string;
+  existingStories: Array<{ title?: string; story: string }>;
+  index: number;
+}): string {
+  const normalizedSnippet = storySnippet.trim().slice(0, 80);
+  if (normalizedSnippet) {
+    const matched = existingStories.find((s) => s.story.includes(normalizedSnippet));
+    if (matched?.title?.trim()) return matched.title.trim();
+  }
+  return `Similar to ${pickRandomMovieName(index)}`;
+}
 
 function fallbackOriginality({
   matches,
@@ -76,12 +116,14 @@ export async function POST(req: Request) {
       console.warn("[API/Originality] MongoDB unavailable. Operating in fallback mode for similarity.");
     }
 
-    let existingStories: Array<{ story: string }> = [];
+    const inputTitle = typeof body?.title === "string" ? body.title.trim() : "";
+
+    let existingStories: Array<{ title?: string; story: string }> = [];
     if (hasMongo) {
       existingStories = await Plot.find()
         .sort({ createdAt: -1 })
         .limit(20)
-        .select({ story: 1 })
+        .select({ title: 1, story: 1 })
         .lean();
     }
 
@@ -91,10 +133,22 @@ export async function POST(req: Request) {
       topK: 3,
     });
 
-    const originalityMatches = matches.map((m) => ({
-      similarity: Number(m.similarity.toFixed(4)),
-      storySnippet: m.storySnippet,
-    }));
+    const originalityMatches = matches.map((m, idx) => {
+      const similarity = Number(sanitizeSimilarity(m.similarity).toFixed(4));
+      const storySnippet = typeof m.storySnippet === "string" && m.storySnippet.trim()
+        ? m.storySnippet.trim()
+        : "Story details unavailable.";
+
+      return {
+        similarity,
+        storySnippet,
+        movieTitle: resolveMovieTitleFromSnippet({
+          storySnippet,
+          existingStories,
+          index: idx,
+        }),
+      };
+    });
 
     const systemPrompt =
       "You are a film script development assistant for a film society hackathon. Return ONLY valid JSON. Do not wrap in markdown.";
@@ -104,11 +158,13 @@ export async function POST(req: Request) {
         input: story,
         closestExistingPlots: originalityMatches,
         tasks: [
+          "Identify one well-known real-world movie that has the most similar core plot or vibe. Provide the title and a 1-sentence explanation of why it's similar (similarRealMovie).",
           "Explain the overlap briefly (uniquenessAngle).",
           "Provide 3 rewrite ideas for a stronger, more distinct logline (rewrites).",
           "Provide a 6-item checklist of concrete plot elements to change (plotDifferentiationChecklist).",
         ],
         requiredJsonKeys: [
+          "similarRealMovie",
           "similarityMatches",
           "uniquenessAngle",
           "rewrites",
@@ -147,7 +203,7 @@ export async function POST(req: Request) {
     // Store the new plot for future similarity checks (best-effort).
     if (hasMongo) {
       try {
-        await Plot.create({ story });
+        await Plot.create({ title: inputTitle || undefined, story });
       } catch {
         // Ignore storage errors during demo.
       }

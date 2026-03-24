@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ThemeToggle } from "../components/theme-toggle";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 
 type ToolStatus = "idle" | "loading" | "error";
 
 type OriginalityResponse = {
   similarityMatches?: Array<{ similarity: number; storySnippet: string }>;
   uniquenessAngle?: string;
+  similarRealMovie?: { title: string; explanation: string };
   rewrites?: Array<{ name: string; logline: string }>;
   plotDifferentiationChecklist?: string[];
   stored?: boolean;
@@ -35,6 +37,24 @@ type ScriptResponse = {
   message?: string;
 };
 
+type EmotionDataPoint = {
+  segment: number;
+  textSnippet: string;
+  joy: number;
+  sadness: number;
+  anger: number;
+  fear: number;
+  surprise: number;
+  trust: number;
+};
+
+type EmotionAnalysisResponse = {
+  overallSentiment: string;
+  summary: string;
+  arc: EmotionDataPoint[];
+  message?: string;
+};
+
 export default function DashboardClient({ name, age }: { name: string; age: string }) {
   const router = useRouter();
 
@@ -56,6 +76,11 @@ export default function DashboardClient({ name, age }: { name: string; age: stri
   const [script, setScript] = useState<ScriptResponse | null>(null);
   const [scriptStatus, setScriptStatus] = useState<ToolStatus>("idle");
   const [scriptError, setScriptError] = useState<string | null>(null);
+
+  const [emotionText, setEmotionText] = useState("");
+  const [emotionAnalysis, setEmotionAnalysis] = useState<EmotionAnalysisResponse | null>(null);
+  const [emotionStatus, setEmotionStatus] = useState<ToolStatus>("idle");
+  const [emotionError, setEmotionError] = useState<string | null>(null);
 
   async function runOriginality() {
     setOrigError(null);
@@ -117,6 +142,27 @@ export default function DashboardClient({ name, age }: { name: string; age: stri
     } catch (e) {
       setScriptStatus("error");
       setScriptError(e instanceof Error ? e.message : "Something went wrong.");
+    }
+  }
+
+  async function runEmotion() {
+    setEmotionError(null);
+    setEmotionStatus("loading");
+    setEmotionAnalysis(null);
+
+    try {
+      const res = await fetch("/api/analyze-emotion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: emotionText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Emotion analysis failed.");
+      setEmotionAnalysis(data);
+      setEmotionStatus("idle");
+    } catch (e) {
+      setEmotionStatus("error");
+      setEmotionError(e instanceof Error ? e.message : "Something went wrong.");
     }
   }
 
@@ -258,6 +304,27 @@ export default function DashboardClient({ name, age }: { name: string; age: stri
               {script ? <ScriptOutput data={script} /> : null}
             </div>
           </FeatureSection>
+
+          <FeatureSection title="Emotion Engine" subtitle="Sentiment Trajectory" number="04" imgSrc="/emotion.png" reverse>
+            <div className="flex flex-col gap-4">
+              <textarea
+                value={emotionText}
+                onChange={(e) => setEmotionText(e.target.value)}
+                placeholder="Paste your script, scene, or lore to analyze the emotional arc..."
+                className="min-h-[160px] w-full resize-none bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 p-5 text-sm font-light text-foreground placeholder:text-foreground/30 outline-none focus:border-primary transition-colors focus:bg-transparent"
+              />
+              <button
+                type="button"
+                onClick={runEmotion}
+                disabled={emotionStatus === "loading" || emotionText.length < 10}
+                className="w-full mt-2 bg-foreground text-background hover:bg-primary hover:text-white transition-all duration-500 ease-out py-5 text-[10px] uppercase tracking-[0.2em] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {emotionStatus === "loading" ? "Analyzing Arc..." : "Analyze Emotions"}
+              </button>
+              {emotionError ? <ErrorBox message={emotionError} /> : null}
+              {emotionAnalysis ? <EmotionOutput data={emotionAnalysis} /> : null}
+            </div>
+          </FeatureSection>
         </div>
 
         <div className="mt-16 text-center text-[11px] uppercase tracking-[0.2em] text-foreground/40 max-w-xl mx-auto border-t border-black/10 dark:border-white/10 pt-8">
@@ -341,10 +408,18 @@ function OriginalityOutput({ data }: { data: OriginalityResponse }) {
             {data.similarityMatches.map((m, idx) => (
               <div key={idx} className="border-l border-primary/30 pl-4 py-1">
                 <div className="text-primary text-xs tracking-wider mb-1">{Math.round(m.similarity * 100)}% Match</div>
-                <div className="text-sm font-serif italic text-foreground/75 leading-relaxed">"{m.storySnippet}"</div>
+                <div className="text-sm font-serif italic text-foreground/75 leading-relaxed">&quot;{m.storySnippet}&quot;</div>
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+
+      {data.similarRealMovie ? (
+        <div className="mb-6 bg-primary/5 border border-primary/20 p-4">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-primary mb-2">Looks Familiar To</div>
+          <div className="text-lg font-serif italic text-foreground mb-1">&quot;{data.similarRealMovie.title}&quot;</div>
+          <div className="text-sm font-light leading-relaxed text-foreground/80">{data.similarRealMovie.explanation}</div>
         </div>
       ) : null}
 
@@ -488,6 +563,55 @@ function ScriptOutput({ data }: { data: ScriptResponse }) {
       ) : null}
       
       {data.message ? <div className="mt-6 text-xs text-foreground/50">{data.message}</div> : null}
+    </div>
+  );
+}
+
+function EmotionOutput({ data }: { data: EmotionAnalysisResponse }) {
+  if (!data?.arc) return null;
+  return (
+    <div className="mt-6 border-t border-black/10 dark:border-white/10 pt-6 animate-in fade-in duration-700">
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <div className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 p-6 relative">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-foreground/50 mb-3">Overall Sentiment</div>
+          <p className="text-xl font-serif text-primary">{data.overallSentiment}</p>
+        </div>
+        <div className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 p-6 relative">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-foreground/50 mb-3">AI Summary</div>
+          <p className="text-sm font-light leading-relaxed text-foreground/90">{data.summary}</p>
+        </div>
+      </div>
+
+      <div className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 p-6 mt-8 relative">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-foreground/50 mb-6">Emotional Trajectory</div>
+        <div className="h-[350px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data.arc} margin={{ top: 20, right: 20, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#525252" vertical={false} opacity={0.3} />
+              <XAxis 
+                dataKey="textSnippet" 
+                stroke="#737373" 
+                fontSize={10} 
+                tickMargin={10}
+                tickFormatter={(val) => val.slice(0, 15) + "..."}
+              />
+              <YAxis stroke="#737373" fontSize={10} domain={[0, 100]} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#000', borderColor: '#333', borderRadius: '4px', color: '#fff' }}
+                itemStyle={{ color: '#fff', fontSize: '12px' }}
+                labelStyle={{ fontSize: '10px', color: '#a3a3a3', marginBottom: '4px' }}
+              />
+              <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '11px' }} />
+              <Line type="monotone" dataKey="joy" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="sadness" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="anger" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="fear" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="surprise" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="trust" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </div>
   );
 }
