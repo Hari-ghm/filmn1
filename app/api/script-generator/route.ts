@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { geminiGenerateJson } from "../../../lib/gemini";
+import { groqGenerateJson } from "../../../lib/groq";
 
 type ScriptResponse = {
   scriptTitle?: string;
@@ -33,7 +33,7 @@ function fallbackScript({ scene, genre, length }: { scene: string; genre: string
     logline,
     screenplay: scenes.join("\n\n"),
     sceneBreakdown: scenes.map((s, idx) => s.split("\n")[0] + (idx === 0 ? " (Setup)" : idx === sceneCount - 1 ? " (Climax)" : "")),
-    message: "Gemini key not set. Using a demo screenplay template.",
+    message: "Groq unavailable. Using a demo screenplay template.",
   };
 }
 
@@ -70,20 +70,26 @@ export async function POST(req: Request) {
       2,
     );
 
-    const gemini = await geminiGenerateJson<ScriptResponse>({
+    const groq = await groqGenerateJson<ScriptResponse>({
       systemPrompt,
       userPrompt: userPrompt + "\nReturn JSON only with those keys.",
       temperature: 0.8,
       maxOutputTokens: 2500,
     });
 
-    if (!gemini.json) {
-      return NextResponse.json(fallback, { status: 200 });
+    if (!groq.json) {
+      return NextResponse.json(
+        {
+          ...fallback,
+          message: `Groq unavailable (${groq.rawText || "invalid JSON"}). Using a demo screenplay template.`,
+        },
+        { status: 200 },
+      );
     }
 
     return NextResponse.json({
-      ...gemini.json,
-      message: gemini.usedFallback ? "Used fallback because Gemini returned invalid JSON." : "OK",
+      ...groq.json,
+      message: groq.usedFallback ? "Used fallback because Groq returned invalid JSON." : "OK",
     });
   } catch (e) {
     return NextResponse.json(

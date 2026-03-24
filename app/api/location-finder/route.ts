@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { geminiGenerateJson } from "../../../lib/gemini";
+import { groqGenerateJson } from "../../../lib/groq";
 
 type LocationResponse = {
   locations?: Array<{
@@ -60,7 +60,7 @@ function fallbackLocations({ vibe }: { vibe: string }): LocationResponse {
       `${v} alley sidewalk`,
       `${v} riverside walkway`,
     ],
-    message: "Gemini key not set. Using demo-friendly location templates.",
+    message: "Groq unavailable. Using demo-friendly location templates.",
   };
 }
 
@@ -98,19 +98,25 @@ export async function POST(req: Request) {
       2,
     );
 
-    const gemini = await geminiGenerateJson<LocationResponse>({
+    const groq = await groqGenerateJson<LocationResponse>({
       systemPrompt,
       userPrompt: userPrompt + "\nReturn JSON only with keys locations and mapSuggestions.",
       temperature: 0.6,
     });
 
-    if (!gemini.json) {
-      return NextResponse.json(fallback, { status: 200 });
+    if (!groq.json) {
+      return NextResponse.json(
+        {
+          ...fallback,
+          message: `Groq unavailable (${groq.rawText || "invalid JSON"}). Using demo-friendly location templates.`,
+        },
+        { status: 200 },
+      );
     }
 
     return NextResponse.json({
-      ...gemini.json,
-      message: gemini.usedFallback ? "Used fallback because Gemini returned invalid JSON." : "OK",
+      ...groq.json,
+      message: groq.usedFallback ? "Used fallback because Groq returned invalid JSON." : "OK",
     });
   } catch (e) {
     return NextResponse.json(

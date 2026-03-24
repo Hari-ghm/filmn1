@@ -1,47 +1,70 @@
-import { pipeline, env } from '@xenova/transformers';
-
-// Skip local model checks, use HuggingFace CDN for the models.
-env.allowLocalModels = false;
+import { groqGenerateJson } from "./groq";
 
 export type SimilarityMatch = {
   similarity: number; // 0..1
   storySnippet: string;
 };
 
-class PipelineSingleton {
-  static task = 'feature-extraction' as const;
-  static model = 'Xenova/all-MiniLM-L6-v2';
-  static instance: any = null;
-
-  static async getInstance() {
-    if (!this.instance) {
-      this.instance = await pipeline(this.task, this.model);
-    }
-    return this.instance;
-  }
+function trimForPrompt(text: string, maxChars: number): string {
+  const cleaned = (text || "").trim();
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars)}...`;
 }
 
-function dotProduct(a: number[], b: number[]) {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += a[i] * b[i];
+function normalizeMatches(data: unknown, topK: number): SimilarityMatch[] {
+  if (!Array.isArray(data)) return [];
+
+  const normalized: SimilarityMatch[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== "object") continue;
+    const similarityRaw = (item as { similarity?: unknown }).similarity;
+    const snippetRaw = (item as { storySnippet?: unknown }).storySnippet;
+    const similarity = typeof similarityRaw === "number" ? similarityRaw : Number(similarityRaw);
+    const storySnippet = typeof snippetRaw === "string" ? snippetRaw.trim() : "";
+
+    if (!Number.isFinite(similarity) || similarity <= 0 || !storySnippet) continue;
+    normalized.push({
+      similarity: Math.max(0, Math.min(1, similarity)),
+      storySnippet: storySnippet.slice(0, 220),
+    });
   }
-  return sum;
+
+  normalized.sort((a, b) => b.similarity - a.similarity);
+  return normalized.slice(0, topK);
 }
 
-function magnitude(arr: number[]) {
-  let sum = 0;
-  for (const val of arr) {
-    sum += val * val;
-  }
-  return Math.sqrt(sum);
-}
+function buildSimilarityPrompt({
+  inputStory,
+  existingStories,
+  topK,
+}: {
+  inputStory: string;
+  existingStories: Array<{ story: string }>;
+  topK: number;
+}): string {
+  const compactInput = trimForPrompt(inputStory, 1000);
+  const compactExisting = existingStories
+    .slice(0, 20)
+    .map((s, idx) => `[Story ${idx}] ${trimForPrompt(s.story, 500)}`)
+    .join("\n\n");
 
-function cosineSimilarity(a: number[], b: number[]) {
-  const magA = magnitude(a);
-  const magB = magnitude(b);
-  if (magA === 0 || magB === 0) return 0;
-  return dotProduct(a, b) / (magA * magB);
+  return `Compare one new story with existing stories and return strict JSON only.
+
+New Story:
+"""
+${compactInput}
+"""
+
+Existing Stories:
+${compactExisting}
+
+Task:
+- Score similarity of plot/themes/characters from 0.0 to 1.0.
+- Return top ${topK} matches with score > 0.
+- Return ONLY a JSON array.
+- Each item must contain:
+  - "similarity": number
+  - "storySnippet": short snippet from matched existing story`;
 }
 
 export async function computeSimilarityMatches({
@@ -54,26 +77,28 @@ export async function computeSimilarityMatches({
   topK?: number;
 }): Promise<SimilarityMatch[]> {
   if (!existingStories || existingStories.length === 0) return [];
-  
-  const extractor = await PipelineSingleton.getInstance();
-  
-  // Extract embedding for the input story
-  const inputOut = await extractor(inputStory, { pooling: 'mean', normalize: true });
-  const inputEmbedding = Array.from(inputOut.data) as number[];
 
-  const scored: SimilarityMatch[] = [];
-  
-  // Extract embeddings and compute similarities for existing stories
-  for (const s of existingStories) {
-    const sOut = await extractor(s.story, { pooling: 'mean', normalize: true });
-    const sEmbedding = Array.from(sOut.data) as number[];
-    const sim = cosineSimilarity(inputEmbedding, sEmbedding);
-    const snippet = s.story.length > 220 ? s.story.slice(0, 220) + "…" : s.story;
-    scored.push({ similarity: sim, storySnippet: snippet });
-  }
+  const prompt = buildSimilarityPrompt({ inputStory, existingStories, topK });
+  const firstTry = await groqGenerateJson<SimilarityMatch[]>({
+    systemPrompt: "You are an expert narrative similarity evaluator. Output strict JSON array of objects.",
+    userPrompt: prompt,
+    temperature: 0.1, // low temperature for consistent evaluation
+    maxOutputTokens: 900,
+  });
+  const firstMatches = normalizeMatches(firstTry.json, topK);
+  if (firstMatches.length > 0) return firstMatches;
 
-  scored.sort((x, y) => y.similarity - x.similarity);
+  // Retry once with even tighter constraints when JSON is malformed/truncated.
+  const retry = await groqGenerateJson<SimilarityMatch[]>({
+    systemPrompt: "Return ONLY valid JSON array. No markdown. No prose.",
+    userPrompt: `${prompt}\n\nReturn at most ${topK} items. Keep each storySnippet under 120 characters.`,
+    temperature: 0,
+    maxOutputTokens: 500,
+  });
+  const retryMatches = normalizeMatches(retry.json, topK);
+  if (retryMatches.length > 0) return retryMatches;
 
-  return scored.slice(0, topK).filter((x) => x.similarity > 0);
+  console.error('[Similarity Error] Failed to generate valid JSON:', retry.rawText || firstTry.rawText);
+  return [];
 }
 

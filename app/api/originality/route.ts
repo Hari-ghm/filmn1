@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectToMongo } from "../../../lib/mongoose";
 import { Plot } from "../../../lib/models/Plot";
 import { computeSimilarityMatches } from "../../../lib/similarity";
-import { geminiGenerateJson } from "../../../lib/gemini";
+import { groqGenerateJson } from "../../../lib/groq";
 
 type OriginalityResponse = {
   similarityMatches?: Array<{ similarity: number; storySnippet: string }>;
@@ -16,9 +16,11 @@ type OriginalityResponse = {
 function fallbackOriginality({
   matches,
   hasMongo,
+  reason,
 }: {
   matches: OriginalityResponse["similarityMatches"] | undefined;
   hasMongo: boolean;
+  reason?: string;
 }): OriginalityResponse {
   const overlap =
     matches && matches.length
@@ -42,9 +44,11 @@ function fallbackOriginality({
       "Add one sensory signature scene that becomes your film’s ‘fingerprint’.",
     ],
     stored: hasMongo,
-    message: hasMongo
-      ? "Gemini key not set. Showing heuristic originality guidance."
-      : "Mongo/Gemini not configured. Showing heuristic originality guidance.",
+    message: reason
+      ? `Groq unavailable (${reason}). Showing heuristic originality guidance.`
+      : hasMongo
+        ? "Groq unavailable. Showing heuristic originality guidance."
+        : "Mongo/Groq unavailable. Showing heuristic originality guidance.",
   };
 }
 
@@ -61,8 +65,16 @@ export async function POST(req: Request) {
     }
 
     // Mongo similarity (optional).
-    const mongo = await connectToMongo().catch(() => null);
+    const mongo = await connectToMongo().catch((err) => {
+      console.error("[API/Originality] MongoDB connection failed:", err);
+      return null;
+    });
     const hasMongo = Boolean(mongo);
+    if (hasMongo) {
+      console.log("[API/Originality] MongoDB connection successful.");
+    } else {
+      console.warn("[API/Originality] MongoDB unavailable. Operating in fallback mode for similarity.");
+    }
 
     let existingStories: Array<{ story: string }> = [];
     if (hasMongo) {
@@ -107,21 +119,29 @@ export async function POST(req: Request) {
       2,
     );
 
-    const gemini = await geminiGenerateJson<OriginalityResponse>({
+    console.log("[API/Originality] Calling Groq with System Prompt & User Prompt...");
+    const groqRes = await groqGenerateJson<OriginalityResponse>({
       systemPrompt,
       userPrompt: userPrompt + "\n\nReturn JSON with those exact keys.",
     });
+    console.log("[API/Originality] Groq call completed. Used fallback?", groqRes.usedFallback);
 
     let response: OriginalityResponse;
-    if (gemini.json) {
+    if (groqRes.json) {
+      console.log("[API/Originality] Groq successfully generated JSON response.");
       response = {
-        ...gemini.json,
-        similarityMatches: gemini.json.similarityMatches?.length ? gemini.json.similarityMatches : originalityMatches,
+        ...groqRes.json,
+        similarityMatches: groqRes.json.similarityMatches?.length ? groqRes.json.similarityMatches : originalityMatches,
         stored: hasMongo,
       };
-      response.message = gemini.usedFallback ? "Used fallback because Gemini returned invalid JSON." : "OK";
+      response.message = groqRes.usedFallback ? "Used fallback because Groq returned invalid JSON." : "OK";
     } else {
-      response = fallbackOriginality({ matches: originalityMatches, hasMongo });
+      console.warn("[API/Originality] Groq generated invalid JSON or failed. Returning heuristic fallback.");
+      response = fallbackOriginality({
+        matches: originalityMatches,
+        hasMongo,
+        reason: groqRes.rawText || "invalid JSON",
+      });
     }
 
     // Store the new plot for future similarity checks (best-effort).
